@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "PACS_Firmware",
+            "type": "ccs-debug",
+            "request": "launch",
+            "projectInfo": {
+                "name": "PACS_Firmware",
+                "resourceId": "/PACS_Firmware"
+            }
+        }
+    ]
+}

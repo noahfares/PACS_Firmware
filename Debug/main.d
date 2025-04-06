@@ -16,6 +16,8 @@ main.obj: C:/Applications/TI/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include
 main.obj: C:/Applications/TI/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/machine/_types.h
 main.obj: C:/Applications/TI/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/machine/_stdint.h
 main.obj: C:/Applications/TI/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/sys/_stdint.h
+main.obj: C:/Applications/TI/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/stdio.h
+main.obj: C:/Applications/TI/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/stdarg.h
 
 ../main.c:
 
@@ -48,4 +50,8 @@ C:/Applications/TI/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/machine/_
 C:/Applications/TI/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/machine/_stdint.h:
 
 C:/Applications/TI/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/sys/_stdint.h:
+
+C:/Applications/TI/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/stdio.h:
+
+C:/Applications/TI/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/stdarg.h:
 

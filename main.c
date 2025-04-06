@@ -1,5 +1,6 @@
 #include <msp430.h>
 #include <stdint.h>
+#include <stdio.h>
 #define TX_BUFFER_SIZE 32 // Adjust based on data size
 
 // Global variables for sensor data
@@ -27,38 +28,28 @@ void uart_init(void) {
 void uart_send(uint8_t *data, uint16_t length) {
   uint16_t i; // Declare loop variable outside for loop
   for (i = 0; i < length; i++) {
-    while (!(IFG2 & UCA0TXIFG))
-      ;                  // Wait for TX buffer to be ready
+    while (!(IFG2 & UCA0TXIFG));                  // Wait for TX buffer to be ready
     UCA0TXBUF = data[i]; // Send byte
   }
 }
 
-// Calculate XBee Checksum
-uint8_t calculate_checksum(uint8_t *frame, uint16_t length) {
-  uint8_t sum = 0;
-  uint16_t i;                    // Declare loop variable outside for loop
-  for (i = 3; i < length; i++) { // Start after length bytes
-    sum += frame[i];
-  }
-  return 0xFF - sum; // Checksum = 0xFF - (Sum of bytes)
-}
-
 // Send XBee API Frame (Transmit Request)
-void send_xbee_transmit_request(uint16_t var1, uint16_t var2, uint16_t var3,
-                                uint16_t var4) {
-  char payload[20]; // Enough space for four 5-digit numbers and spaces
-  snprintf(payload, sizeof(payload), "%u %u %u %u", var1, var2, var3, var4);
+void send_xbee_transmit_request(int var1, int var2, int var3,
+                                int var4) {
+  char payload[30]; // Enough space for "90 90 90 90"
+  memset(payload, 0, sizeof(payload));
+  snprintf(payload, sizeof(payload), "%d %d %d %d", var1, var2, var3, var4);
   uint8_t payload_length = strlen(payload);
 
   uint16_t frame_length = 14 + payload_length;
-  uint8_t frame[TX_BUFFER_SIZE] = {0};
+  uint8_t frame[100] = {0}; // Ensure buffer is large enough
 
   // Build XBee API Frame
   frame[0] = 0x7E;
   frame[1] = (frame_length >> 8) & 0xFF;
   frame[2] = frame_length & 0xFF;
-  frame[3] = 0x10;
-  frame[4] = 0x01;
+  frame[3] = 0x10; // Transmit Request
+  frame[4] = 0x01; // Frame ID
   // 64-bit Dest Address (Broadcast)
   frame[5] = 0x00;
   frame[6] = 0x00;
@@ -71,17 +62,19 @@ void send_xbee_transmit_request(uint16_t var1, uint16_t var2, uint16_t var3,
   // 16-bit Dest Address
   frame[13] = 0xFF;
   frame[14] = 0xFE;
-  frame[15] = 0x00;
-  frame[16] = 0x00;
+  frame[15] = 0x00; // Broadcast radius
+  frame[16] = 0x00; // Options
 
   // Copy Payload
-  uint8_t i;
-  for (i = 0; i < payload_length; i++) {
-    frame[17 + i] = payload[i];
-  }
+  memcpy(&frame[17], payload, payload_length);
 
   // Compute Checksum
-  uint8_t checksum = calculate_checksum(frame, 17 + payload_length);
+  uint8_t checksum = 0;
+  uint8_t i;
+  for (i = 3; i < (17 + payload_length); i++) {
+    checksum += frame[i];
+  }
+  checksum = 0xFF - checksum; // XBee checksum calculation
   frame[17 + payload_length] = checksum;
 
   // Send Frame
@@ -133,10 +126,10 @@ void read_light_sensor() {
 
 // Function to control pump
 void control_pump() {
-  P2OUT |= BIT2;               // Turn pump on
-  __delay_cycles(60000000);    // Run for 1 minute (assuming 1MHz clock)
-  P2OUT &= ~BIT2;              // Turn pump off
-  __delay_cycles(28800000000); // Off for 8 hours
+  P2OUT |= BIT2;            // Turn pump on
+  __delay_cycles(10000000); // Run for 10 sec
+  P2OUT &= ~BIT2;           // Turn pump off
+  __delay_cycles(10000000); // Stop for 10 sec
 }
 
 // Main function
@@ -149,18 +142,17 @@ int main(void) {
 
   uart_init(); // Initialize UART
 
-  __delay_cycles(1000000); // Small delay before sending
+  __delay_cycles(1000000); // Small delay before sending (1s)
 
-  send_xbee_transmit_request(10, 10, 10, 10);
-
-      while (1) {
-    /*
+  while (1) {
     read_voltage_sensor();
-    read_temp_sensor();
     read_water_level_sensor();
+    read_temp_sensor();
     read_light_sensor();
+    /*
     toggle_zigbee_wake();
-    control_pump();
     */
+    send_xbee_transmit_request(10, 10, 10, 10);
+    control_pump();
   }
 }
