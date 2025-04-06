@@ -84,7 +84,7 @@ void send_xbee_transmit_request(int var1, int var2, int var3,
 // Function to read voltage sensor
 void read_voltage_sensor() {
   P2OUT |= BIT0;            // Turn on voltage sensor
-  __delay_cycles(1000);     // Small delay for stabilization
+  __delay_cycles(1000000);     // Small delay for stabilization
   voltage_value = ADC10MEM; // Read ADC value from P1.4
   P2OUT &= ~BIT0;           // Turn off voltage sensor
 }
@@ -152,7 +152,8 @@ int main(void) {
     /*
     toggle_zigbee_wake();
     */
-    send_xbee_transmit_request(10, 10, 10, 10);
-    control_pump();
+    send_xbee_transmit_request(voltage_value, water_level_value, temp_value, light_value);
+    __delay_cycles(1000000); // Small delay before sending (1s)
+    //control_pump();
   }
 }
