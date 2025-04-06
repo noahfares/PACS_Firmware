@@ -1,0 +1,7 @@
+[
+   {
+      "directory" : "C:/Files/PACS/New folder/PACS_Firmware/Debug",
+      "command"   : "clang++ -I\"C:/Applications/TI/ccs/ccs_base/msp430/include\" -I\"C:/Files/PACS/New folder/PACS_Firmware\" -I\"C:/Applications/TI/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include\" -D__MSP430G2553__ -xc",
+      "file"      : "C:/Files/PACS/New folder/PACS_Firmware/main.c"
+   }
+]
