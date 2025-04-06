@@ -167,6 +167,8 @@ void send_xbee_transmit_request(int var1, int var2, int var3, int var4) {
 void read_voltage_sensor() {
   // Configure ADC10CTL1:
   // - INCH_4: Select channel AA (P1.4).
+  ADC10CTL0 = ADC10SHT_2 + ADC10ON;
+  __delay_cycles(1000); // Increase delay if necessary
   ADC10CTL1 = INCH_4;
 
   P2OUT |= BIT0;            // Turn on voltage sensor
@@ -179,9 +181,10 @@ void read_voltage_sensor() {
 void read_temp_sensor() {
   // Configure ADC10CTL1:
   // - INCH_3: Select channel A3 (P1.3).
+  ADC10CTL0 = ADC10SHT_2 + ADC10ON;
+  __delay_cycles(1000); // Increase delay if necessary
   ADC10CTL1 = INCH_3;
 
-  __delay_cycles(1000);  // Small delay for stabilization (0.1s)
   // Convert voltage to temperature in °C
   // MCP9700 outputs ~500 mV at 0°C, 10 mV/°C slope.
   temp_value = (((adc_readout() * 3.3) / 1023.0) - 0.5) * 100;
@@ -218,12 +221,14 @@ int adc_readout() {
   // Start ADC conversion:
   ADC10CTL0 |= ENC | ADC10SC; // Enable conversion and start conversion
 
+  __delay_cycles(1000); // Increase delay if necessary
   // Wait for conversion to complete:
   // (ADC10SC automatically clears when conversion is done)
   while (ADC10CTL1 & ADC10BUSY)
     ;
 
   int adcValue = ADC10MEM;
+  ADC10CTL0 &= ~ADC10ON;
   return adcValue;
 }
 
