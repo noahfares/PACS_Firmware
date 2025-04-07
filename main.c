@@ -4,13 +4,10 @@
 #define TX_BUFFER_SIZE 32 // Adjust based on data size
 
 // Light Sensor Reg commands
-#define SENSOR_ADDR 0x29
-#define ALS_CONTR_REG 0x80
-#define ALS_MEAS_RATE_REG 0x85
-#define ALS_DATA_CH1_LOW 0x88
-#define ALS_DATA_CH1_HIGH 0x89
-#define ALS_DATA_CH0_LOW 0x8A
-#define ALS_DATA_CH0_HIGH 0x8B
+#define LTR303_ADDR     0x29      // 7-bit I2C address for the sensor
+#define ALS_CONTR       0x80      // Control register for ALS operation
+#define ALS_MEAS_RATE   0x85      // Measurement rate register
+const uint8_t als_channel_regs[4] = { 0x88, 0x89, 0x8A, 0x8B };
 
 // Global variables for sensor data
 volatile int voltage_value = 0;
@@ -20,73 +17,102 @@ volatile int light_value = 0;
 volatile int zigbee_sleep_state = 1; // 1 = asleep, 0 = awake
 
 //-------------------------------------------LIGHTSENSOR-------------------------------------------
-void i2c_init(void) {
-  UCB0CTL1 |= UCSWRST;
-  UCB0CTL0 = UCMST + UCMODE_3 + UCSYNC;
-  UCB0CTL1 = UCSSEL_2 + UCSWRST;
-  UCB0BR0 = 12;
-  UCB0BR1 = 0;
-  UCB0I2CSA = SENSOR_ADDR;
-  UCB0CTL1 &= ~UCSWRST;
+void I2C_init(void) {
+    UCB0CTL1 |= UCSWRST;                      // Enable software reset
+    UCB0CTL0 = UCMST + UCMODE_3 + UCSYNC;       // I2C Master, synchronous mode
+    UCB0CTL1 = UCSSEL_2 + UCSWRST;              // Use SMCLK; keep in reset
+    UCB0BR0 = 12;                             // Set clock divider (adjust for desired SCL frequency)
+    UCB0BR1 = 0;
+    UCB0I2CSA = LTR303_ADDR;                   // Set the slave address
+    UCB0CTL1 &= ~UCSWRST;                      // Clear software reset to start I2C
 }
 
-void i2c_write_register(unsigned char reg, unsigned char value) {
-  while (UCB0CTL1 & UCTXSTP)
-    ;
-  UCB0CTL1 |= UCTR + UCTXSTT;
-  while (!(IFG2 & UCB0TXIFG))
-    ;
-  UCB0TXBUF = reg;
-  while (!(IFG2 & UCB0TXIFG))
-    ;
-  UCB0TXBUF = value;
-  while (!(IFG2 & UCB0TXIFG))
-    ;
-  UCB0CTL1 |= UCTXSTP;
-  while (UCB0CTL1 & UCTXSTP)
-    ;
+void I2C_WriteByte(unsigned char reg, unsigned char value) {
+    while (UCB0CTL1 & UCTXSTP);                // Ensure stop condition is finished
+    UCB0I2CSA = LTR303_ADDR;                   // Set slave address
+    UCB0CTL1 |= UCTR + UCTXSTT;                // I2C TX, start condition
+
+    while (!(IFG2 & UCB0TXIFG));               // Wait for start condition to be sent
+    UCB0TXBUF = reg;                         // Send register address
+
+    while (!(IFG2 & UCB0TXIFG));               // Wait until register address is transmitted
+    UCB0TXBUF = value;                        // Send data byte
+
+    while (!(IFG2 & UCB0TXIFG));               // Wait until data byte is transmitted
+    UCB0CTL1 |= UCTXSTP;                       // Generate stop condition
+
+    __delay_cycles(1000);                      // Short delay to ensure stop condition is sent
 }
 
-unsigned char i2c_read_register(unsigned char reg) {
-  unsigned char data;
+uint8_t I2C_readByte(uint8_t reg) {
+  uint8_t data;
+  UCB0I2CSA = LTR303_ADDR; // Set slave address
+
   while (UCB0CTL1 & UCTXSTP)
-    ;
-  UCB0CTL1 |= UCTR + UCTXSTT;
+    ; // Wait if a previous stop is in progress
+
+  // Transmit the register address in TX mode.
+  UCB0CTL1 |= UCTR + UCTXSTT; // TX mode; start condition
   while (!(IFG2 & UCB0TXIFG))
-    ;
-  UCB0TXBUF = reg;
+    ;              // Wait for TX buffer ready
+  UCB0TXBUF = reg; // Send register address
+
   while (!(IFG2 & UCB0TXIFG))
-    ;
-  UCB0CTL1 &= ~UCTR;
-  UCB0CTL1 |= UCTXSTT;
+    ;                  // Wait for transmission
+  UCB0CTL1 |= UCTXSTP; // Generate stop condition
+  while (UCB0CTL1 & UCTXSTP)
+    ; // Wait for stop condition to finish
+
+  // Switch to receiver mode to read the data.
+  UCB0CTL1 &= ~UCTR;   // Clear TX flag: receiver mode
+  UCB0CTL1 |= UCTXSTT; // Start condition for read
   while (UCB0CTL1 & UCTXSTT)
-    ;
-  UCB0CTL1 |= UCTXSTP;
-  while (!(IFG2 & UCB0RXIFG))
-    ;
-  data = UCB0RXBUF;
+    ; // Wait for start to complete
+
+  data = UCB0RXBUF;    // Read received data
+  UCB0CTL1 |= UCTXSTP; // Generate stop condition
   while (UCB0CTL1 & UCTXSTP)
-    ;
+    ; // Wait for stop condition to complete
+
   return data;
 }
 
-void calculate_lux(unsigned int ch0, unsigned int ch1) {
-  double factor = 0.034; // Conversion factor
-  light_value = (ch0 > ch1) ? (ch0 - ch1) * factor : 0;
+void calculate_lux(uint16_t ch0, uint16_t ch1) {
+  int als_gain = 1;
+  int als_int = 2;
+  // Calibration for the covered top
+  double pf_factor = 1.087;
+  double ratio = ch1/(ch0 + ch1);
+
+  if (ratio < 0.45) {
+    light_value = (1.7743 * ch0 + 1.1059 * ch1)/ als_gain / als_int / pf_factor;
+  } else if (ratio < 0.64 && ratio >= 0.45) {
+    light_value = (4.2785 * ch0 - 1.9548 * ch1)/ als_gain / als_int / pf_factor;
+  } else if (ratio < 0.85 && ratio >= 0.65) {
+    light_value = (0.5926 * ch0 + 0.1185 * ch1)/ als_gain / als_int / pf_factor;
+  } else {
+    light_value = 0;
+  }
+
 }
 
 void read_light_sensor(void) {
-  unsigned int ch1_data, ch0_data;
-  unsigned char low, high;
+  unsigned char sensorData[4];
+  uint16_t channel1, channel0, i;
+  I2C_WriteByte(ALS_CONTR, 0x01); // Active mode, gain 1X
 
-  low = i2c_read_register(ALS_DATA_CH1_LOW);
-  high = i2c_read_register(ALS_DATA_CH1_HIGH);
-  ch1_data = ((unsigned int)high << 8) | low;
-  low = i2c_read_register(ALS_DATA_CH0_LOW);
-  high = i2c_read_register(ALS_DATA_CH0_HIGH);
-  ch0_data = ((unsigned int)high << 8) | low;
+  __delay_cycles(500000); // Wait 500ms
+  for (i = 0; i < 4; i++) {
+    sensorData[i] = I2C_readByte(als_channel_regs[i]);
+  }
 
-  calculate_lux(ch0_data, ch1_data);
+  // Combine the bytes into 16-bit values
+  channel1 = (sensorData[1] << 8) | sensorData[0];
+  channel0 = (sensorData[3] << 8) | sensorData[2];
+  calculate_lux(channel0, channel1);
+  send_xbee_transmit_request(channel0, channel1, 0, light_value);
+
+  I2C_WriteByte(ALS_CONTR, 0x00); // Standby
 }
 //--------------------------------------------------------------------------------------------------
 
@@ -117,7 +143,7 @@ void uart_send(uint8_t *data, uint16_t length) {
 
 // Send XBee API Frame (Transmit Request)
 void send_xbee_transmit_request(int var1, int var2, int var3, int var4) {
-  char payload[30]; // Enough space for "90 90 90 90"
+  char payload[30];
   memset(payload, 0, sizeof(payload));
   snprintf(payload, sizeof(payload), "%d %d %d %d", var1, var2, var3, var4);
   uint8_t payload_length = strlen(payload);
@@ -240,32 +266,25 @@ int main(void) {
   P2DIR &= ~BIT4;                 // Set P2.4 as input
   ADC10AE0 |= BIT3| BIT4 | BIT5;  // Enable analog input on P1.3
   P1DIR &= ~(BIT3 | BIT4 | BIT5); // Set P1.3, P1.4, P1.5 as inputs
-  P1SEL |= BIT6 + BIT7;           // I2C: SCL on P1.6, SDA on P1.7
-
-  // Configure ADC10:
-  // - ADC10SHT_2: 16 x ADC10CLK cycles sample and hold time.
-  // - ADC10ON: Turn on ADC10 module.
-  ADC10CTL0 = ADC10SHT_2 + ADC10ON;
+  P1SEL |= BIT6 | BIT7;           // I2C: SCL on P1.6, SDA on P1.7
+  P1SEL2 |= BIT6 + BIT7;
 
   uart_init(); // Initialize UART
-  // i2c_init(); // Initialize I2C
-  // i2c_write_register(ALS_CONTR_REG, 0x01); // Active mode, gain 1X
-  // i2c_write_register(ALS_MEAS_RATE_REG, 0x12); // 200ms integration &
-  // measurement rate
+  I2C_init(); // Initialize I2C
+  I2C_WriteByte(ALS_CONTR, 0x01); // Active mode, gain 1X
+  I2C_WriteByte(ALS_MEAS_RATE, 0x12); // 200ms integration & measurement rate
 
   __delay_cycles(1000000); // Small delay (1s)
 
   while (1) {
     read_voltage_sensor();
-    read_temp_sensor();
-    /*
     read_water_level_sensor();
+    read_temp_sensor();
     read_light_sensor();
-    toggle_zigbee_wake();
-    */
-    send_xbee_transmit_request(voltage_value, water_level_value, temp_value,
-                               light_value);
-    __delay_cycles(1000000); // Small delay before sending (1s)
+    //toggle_zigbee_wake();
+ 
+    send_xbee_transmit_request(voltage_value, water_level_value, temp_value, light_value);
+    __delay_cycles(1000000); // Small delay before next iteration(1s)
     // control_pump();
   }
 }
