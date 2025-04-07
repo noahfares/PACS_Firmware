@@ -1,7 +1,7 @@
 #include <msp430.h>
 #include <stdint.h>
 #include <stdio.h>
-#define TX_BUFFER_SIZE 32 // Adjust based on data size
+volatile unsigned int intervalCount = 0;
 
 // Light Sensor Reg commands
 #define LTR303_ADDR     0x29      // 7-bit I2C address for the sensor
@@ -227,19 +227,26 @@ void read_water_level_sensor() {
 }
 
 // Function to wake Zigbee
+// Xbee initially is awake when device boots, stay awake for a minute, and then sleep for a while
+// Once the device is in its 30 min cycles, this function will wake and wait for Xbee, then give 
+// it 30 sec to connect to HA, it will send its data after being awake for a min, go back to sleep.
 void toggle_zigbee_wake() {
-  P2OUT ^= BIT5;                              // Toggle P2.5
-  __delay_cycles(5000);                       // Small delay
-  P2OUT ^= BIT5;                              // Toggle again
-  zigbee_sleep_state = (P2IN & BIT4) ? 1 : 0; // Read sleep indicator (P2.4)
+  P2OUT ^= BIT5;        // Toggle P2.5
+  __delay_cycles(5000); // Small delay
+  P2OUT ^= BIT5;        // Toggle again
+
+  while ((zigbee_sleep_state = (P2IN & BIT4) ? 1 : 0) == 1) {
+    // Loop until P2.4 is low meaning the xbee is awake
+    __delay_cycles(1000); // Small delay
+  }
+  __delay_cycles(500000); // Wait 30 sec for Xbee to connect to HA
 }
 
 // Function to control pump
 void control_pump() {
   P2OUT |= BIT2;            // Turn pump on
-  __delay_cycles(10000000); // Run for 10 sec
+  __delay_cycles(1000000); // Run for 1 sec
   P2OUT &= ~BIT2;           // Turn pump off
-  __delay_cycles(10000000); // Stop for 10 sec
 }
 
 // Centralized reading of adc converions
@@ -260,31 +267,69 @@ int adc_readout() {
 
 // Main function
 int main(void) {
+  int pump_counter = 0;
+
   WDTCTL = WDTPW | WDTHOLD; // Stop watchdog timer
 
   P2DIR |= BIT0 | BIT2 | BIT5;    // Set P2.0, P2.2, and P2.5 as outputs
   P2DIR &= ~BIT4;                 // Set P2.4 as input
+
   ADC10AE0 |= BIT3| BIT4 | BIT5;  // Enable analog input on P1.3
   P1DIR &= ~(BIT3 | BIT4 | BIT5); // Set P1.3, P1.4, P1.5 as inputs
+
   P1SEL |= BIT6 | BIT7;           // I2C: SCL on P1.6, SDA on P1.7
   P1SEL2 |= BIT6 + BIT7;
 
+  // Comms Initialization
   uart_init(); // Initialize UART
   I2C_init(); // Initialize I2C
   I2C_WriteByte(ALS_CONTR, 0x01); // Active mode, gain 1X
   I2C_WriteByte(ALS_MEAS_RATE, 0x12); // 200ms integration & measurement rate
 
-  __delay_cycles(1000000); // Small delay (1s)
+/*
+  // Configure the watchdog timer in interval mode.
+  // For many MSP430s, WDTIS_3 sets the interval to approximately 8 seconds when using VLO.
+  WDTCTL = WDTPW | WDTTMSEL | WDTCNTCL | WDTIS_3;  
+  IE1 |= WDTIE;  // Enable WDT interrupt
+  __bis_SR_register(GIE); // Enable global interrupts
+*/
 
+  __delay_cycles(1000000); // Small delay (1s)
   while (1) {
-    read_voltage_sensor();
-    read_water_level_sensor();
-    read_temp_sensor();
-    read_light_sensor();
-    //toggle_zigbee_wake();
- 
-    send_xbee_transmit_request(voltage_value, water_level_value, temp_value, light_value);
-    __delay_cycles(1000000); // Small delay before next iteration(1s)
-    // control_pump();
+    // Enter low-power mode (LPM3). The device will wake on the WDT interrupt.
+    //__bis_SR_register(LPM3_bits + GIE);
+
+    // Check if 30 minutes have elapsed.
+    //if (intervalCount >= 225) {
+    //  intervalCount = 0; // Reset the counter
+      pump_counter++;
+      read_voltage_sensor();
+      read_water_level_sensor();
+      read_temp_sensor();
+      read_light_sensor();
+
+      toggle_zigbee_wake();
+
+      send_xbee_transmit_request(voltage_value, water_level_value, temp_value, light_value);
+
+      // Water every 12 hrs
+      if (pump_counter == 24) {
+        pump_counter = 0;
+        control_pump();
+      }
+    //}
+    __delay_cycles(1000000); // Small delay (1s)
   }
 }
+
+/*
+// Watchdog Timer ISR - fires approximately every 8 seconds.
+#pragma vector=WDT_VECTOR
+__interrupt void watchdog_timer(void)
+{
+    intervalCount++;  // Count the 8-second interval
+
+    // Exit LPM3 so that main() can check the counter.
+    __bic_SR_register_on_exit(LPM3_bits);
+}
+*/
